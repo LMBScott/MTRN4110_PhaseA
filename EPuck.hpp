@@ -6,6 +6,7 @@
 #include <webots/Motor.hpp>
 #include <webots/DistanceSensor.hpp>
 #include <webots/InertialUnit.hpp>
+#include <webots/PositionSensor.hpp>
 
 class EPuck : public webots::Robot {
 public:
@@ -16,15 +17,16 @@ public:
     void SetUpExecutionFile();
 private:
     static constexpr int NUM_DISTANCE_SENSORS {11};                     // Number of distance sensors on the e-puck robot
-    static constexpr int YAW_SAMPLE_SIZE {10};
+    static constexpr int DIST_SAMPLE_SIZE {5};
     static constexpr double MAX_MOTOR_SPEED {6.28};                     // Max motor speed of the e-puck robot, in rads/s
     static constexpr double TURN_SPEED {MAX_MOTOR_SPEED / 4};           // Speed of motors during a turn, in rads/s
     static constexpr double FORWARD_SPEED {MAX_MOTOR_SPEED / 2};        // Speed of motors moving forward, in rads/s
-    static constexpr double AXLE_LENGTH {0.052};                        // Axle length of the e-puck robot, in meters
-    static constexpr double WHEEL_RADIUS {0.0205};                      // Wheel radius of the e-puck robot, in meters
+    static constexpr double AXLE_LENGTH {0.04486};                      // Axle length of the e-puck robot, in meters
+    static constexpr double WHEEL_RADIUS {0.02};                      // Wheel radius of the e-puck robot, in meters
     static constexpr double INTER_CELL_DIST {0.165};                    // Distance between maze cells, in meters
     static constexpr double WALL_THICKNESS {0.015};                     // Thickness of maze walls, in meters
-    static constexpr double WALL_DETECTION_THRESHOLD {1000.0};          // Minimum proximity sensor reading indicating wall presence
+    static constexpr double WALL_DETECTION_THRESHOLD {750.0};           // Minimum proximity sensor reading indicating wall presence
+    static constexpr double POSITION_TOLERANCE {0.02};
     static constexpr double TURN_ANGLE_TOLERANCE {0.04};                // Tolerance of turn angles, in radians
     static const std::string PLAN_INPUT_FILE;
     static const std::string EXECUTION_OUTPUT_FILE;
@@ -39,7 +41,6 @@ private:
     int planStep;
     int row;
     int column;
-    int numYawSamples;
     Direction heading;
     std::array<bool, 3> wallVisibility;
     std::array<double, NUM_DISTANCE_SENSORS> distReadings;              // Stores current reading values of each built-in distance sensor
@@ -48,22 +49,33 @@ private:
     std::unique_ptr<webots::InertialUnit> IMU;
     std::unique_ptr<webots::Motor> leftMotor;
     std::unique_ptr<webots::Motor> rightMotor;
+    std::unique_ptr<webots::PositionSensor> leftPosSensor;
+    std::unique_ptr<webots::PositionSensor> rightPosSensor;
     double simTime;                                                     // Stores current simulation time
     double turnDuration;
     double forwardDuration;
+    double turnPosDelta;
+    double forwardPosDelta;
     double stepEndTime;                                                 // The simulation time at which the current step will be complete
     double leftSetSpeed;
     double rightSetSpeed;
+    double leftWheelPos;
+    double rightWheelPos;
+    double leftWheelSetPos;
+    double rightWheelSetPos;
     double roll;
     double pitch;
     double yaw;
-    double yawAvg;
+    bool isStepComplete;
     bool isPlanComplete;
     FileHandler fileHandler;
     std::unique_ptr<MotionPlan> plan;
+    bool IsWithinTolerance(double value, double target, double tolerance);
+    void UpdateSensors();
     void Print(std::string message);
     void PrintPlanState();
     void PrintPlanDetails();
     void PrintIMUReadings();
     void PrintDistanceReadings();
+    void PrintWheelPositions();
 };

@@ -62,6 +62,9 @@ EPuck::EPuck()
     turnDuration = M_PI_2 * AXLE_LENGTH / (2 * TURN_SPEED * WHEEL_RADIUS);
     forwardDuration = INTER_CELL_DIST / WHEEL_RADIUS / FORWARD_SPEED;
 
+    turnPosDelta = AXLE_LENGTH / WHEEL_RADIUS;
+    forwardPosDelta = INTER_CELL_DIST / WHEEL_RADIUS;
+
     leftSetSpeed = 0.0;
     leftSetSpeed = 0.0;
 
@@ -78,121 +81,97 @@ EPuck::EPuck()
     leftMotor = std::make_unique<webots::Motor>(*getMotor("left wheel motor"));
     rightMotor = std::make_unique<webots::Motor>(*getMotor("right wheel motor"));
 
-    leftMotor->setPosition(INFINITY);
-    rightMotor->setPosition(INFINITY);
+    leftWheelSetPos = 0.0;
+    rightWheelSetPos = 0.0;
 
-    leftMotor->setVelocity(0.0);
-    rightMotor->setVelocity(0.0);
+    leftMotor->setPosition(leftWheelSetPos);
+    rightMotor->setPosition(rightWheelSetPos);
+
+    leftSetSpeed = 0.0;
+    rightSetSpeed = 0.0;
+
+    leftMotor->setVelocity(leftSetSpeed);
+    rightMotor->setVelocity(rightSetSpeed);
+
+    leftPosSensor = std::make_unique<webots::PositionSensor>(*getPositionSensor("left wheel sensor"));
+    rightPosSensor = std::make_unique<webots::PositionSensor>(*getPositionSensor("right wheel sensor"));
+
+    leftPosSensor->enable(timeStep);
+    rightPosSensor->enable(timeStep);
 }
 
 void EPuck::Run()
 {
-    // Sensor reading updates
-    for (int i = 0; i < NUM_DISTANCE_SENSORS; i++)
-    {
-        distReadings[i] = distSensors[i]->getValue();
-    }
+    UpdateSensors();
 
     wallVisibility[0] = distReadings[7] <= WALL_DETECTION_THRESHOLD;
     wallVisibility[1] = distReadings[0] <= WALL_DETECTION_THRESHOLD;
     wallVisibility[2] = distReadings[3] <= WALL_DETECTION_THRESHOLD;
 
-    roll = IMU->getRollPitchYaw()[0];
-    pitch = IMU->getRollPitchYaw()[1];
-    yaw = IMU->getRollPitchYaw()[2];
+    isStepComplete = IsWithinTolerance(leftWheelPos, leftWheelSetPos, POSITION_TOLERANCE) &&
+                     IsWithinTolerance(rightWheelPos, rightWheelSetPos, POSITION_TOLERANCE);
 
     // Check if current step has been completed
-    if (!isPlanComplete && simTime >= stepEndTime)
+    if (!isPlanComplete && isStepComplete)
     {
         if (planStep < plan->steps.size())
         {
-            int yawAdjustSign = (heading == Direction::South && yaw < 0) ? -1 : 1;
-
-            if (numYawSamples < YAW_SAMPLE_SIZE)
+            if (planStep == 0)
             {
-                leftSetSpeed = 0.0;
-                rightSetSpeed = 0.0;
-                yawAvg += yaw * yawAdjustSign;
-
-                numYawSamples++;
-
-                if (numYawSamples == YAW_SAMPLE_SIZE)
-                {
-                    yawAvg /= YAW_SAMPLE_SIZE;
-                }
+                Print("Executing motion plan...\n");
             }
-            else if (yawAvg < yawAdjustSign * (HEADING_YAWS.at(heading) - TURN_ANGLE_TOLERANCE))
+
+            PrintPlanState();
+            fileHandler.WritePlanState(EXECUTION_OUTPUT_FILE, planStep, row, column, heading, wallVisibility);
+
+            // Move to next step
+            switch (plan->steps[planStep])
             {
-                double correctionSpeed = std::min(std::abs(HEADING_YAWS.at(heading) - yawAvg) * AXLE_LENGTH / ((float)timeStep / 250 * WHEEL_RADIUS), MAX_MOTOR_SPEED);
-                leftSetSpeed = -correctionSpeed;
-                rightSetSpeed = correctionSpeed;
+                case Movement::Left:
+                    leftWheelSetPos = leftWheelPos - turnPosDelta;
+                    rightWheelSetPos = rightWheelPos + turnPosDelta;
+                    leftSetSpeed = TURN_SPEED;
+                    rightSetSpeed = TURN_SPEED;
 
-                yawAvg = 0;
-                numYawSamples = 0;
+                    heading = LEFT_TURN_MAP.at(heading);
+                    break;
+                case Movement::Forward:
+                    leftWheelSetPos = leftWheelPos + forwardPosDelta;
+                    rightWheelSetPos = rightWheelPos + forwardPosDelta;
+                    leftSetSpeed = FORWARD_SPEED;
+                    rightSetSpeed = FORWARD_SPEED;
+
+                    row += MOVEMENT_DELTAS.at(heading)[0];
+                    column += MOVEMENT_DELTAS.at(heading)[1];
+                    break;
+                case Movement::Right:
+                    leftWheelSetPos = leftWheelPos + turnPosDelta;
+                    rightWheelSetPos = rightWheelPos - turnPosDelta;
+                    leftSetSpeed = TURN_SPEED;
+                    rightSetSpeed = TURN_SPEED;
+
+                    heading = RIGHT_TURN_MAP.at(heading);
+                    break;
+                default:
+                    throw std::runtime_error(PRINT_PREFIX + "Invalid Movement value encountered.");
+                    break;
             }
-            else if (yawAvg > yawAdjustSign * (HEADING_YAWS.at(heading) + TURN_ANGLE_TOLERANCE))
-            {
-                double correctionSpeed = std::min(std::abs(HEADING_YAWS.at(heading) - yawAvg) * AXLE_LENGTH / ((float)timeStep / 250 * WHEEL_RADIUS), MAX_MOTOR_SPEED);
-                leftSetSpeed = correctionSpeed;
-                rightSetSpeed = -correctionSpeed;
-
-                yawAvg = 0;
-                numYawSamples = 0;
-            }
-            else
-            {
-                if (planStep == 0)
-                {
-                    Print("Executing motion plan...\n");
-                }
-
-                PrintPlanState();
-                fileHandler.WritePlanState(EXECUTION_OUTPUT_FILE, planStep, row, column, heading, wallVisibility);
-
-                // Move to next step
-                switch (plan->steps[planStep])
-                {
-                    case Movement::Left:
-                        stepEndTime = simTime + turnDuration;
-                        leftSetSpeed = -TURN_SPEED;
-                        rightSetSpeed = TURN_SPEED;
-
-                        heading = LEFT_TURN_MAP.at(heading);
-                        break;
-                    case Movement::Forward:
-                        stepEndTime = simTime + forwardDuration;
-                        leftSetSpeed = FORWARD_SPEED;
-                        rightSetSpeed = FORWARD_SPEED;
-
-                        row += MOVEMENT_DELTAS.at(heading)[0];
-                        column += MOVEMENT_DELTAS.at(heading)[1];
-                        break;
-                    case Movement::Right:
-                        stepEndTime = simTime + turnDuration;
-                        leftSetSpeed = TURN_SPEED;
-                        rightSetSpeed = -TURN_SPEED;
-
-                        heading = RIGHT_TURN_MAP.at(heading);
-                        break;
-                    default:
-                        throw std::runtime_error(PRINT_PREFIX + "Invalid Movement value encountered.");
-                        break;
-                }
-                numYawSamples = 0;
-                yawAvg = 0;
-                planStep++;
-            }
+            planStep++;
         }
         else
         {
             // All steps complete, plan is complete
             Print("Motion plan executed!\n");
+            leftWheelSetPos = INFINITY;
+            rightWheelSetPos = INFINITY;
             leftSetSpeed = 0.0;
             rightSetSpeed = 0.0;
             isPlanComplete = true;
         }
     }
 
+    leftMotor->setPosition(leftWheelSetPos);
+    rightMotor->setPosition(rightWheelSetPos);
     leftMotor->setVelocity(leftSetSpeed);
     rightMotor->setVelocity(rightSetSpeed);
 
@@ -220,6 +199,26 @@ void EPuck::ReadMotionPlan()
 void EPuck::SetUpExecutionFile()
 {
     fileHandler.WriteExecutionHeader(EXECUTION_OUTPUT_FILE);
+}
+
+void EPuck::UpdateSensors()
+{
+    for (int i = 0; i < NUM_DISTANCE_SENSORS; i++)
+    {
+        distReadings[i] = distSensors[i]->getValue();
+    }
+
+    roll = IMU->getRollPitchYaw()[0];
+    pitch = IMU->getRollPitchYaw()[1];
+    yaw = IMU->getRollPitchYaw()[2];
+
+    leftWheelPos = leftPosSensor->getValue();
+    rightWheelPos = rightPosSensor->getValue();
+}
+
+bool EPuck::IsWithinTolerance(double value, double target, double tolerance)
+{
+    return (value >= target - tolerance) && (value <= target + tolerance);
 }
 
 void EPuck::Print(std::string message)
@@ -276,6 +275,15 @@ void EPuck::PrintDistanceReadings()
     }
 
     output << distSensorNames.back() << ": " << distReadings.back() << std::endl;
+
+    Print(output.str());
+}
+
+void EPuck::PrintWheelPositions()
+{
+    std::stringstream output;
+
+    output << "Left Wheel Position (rad): " << leftWheelPos << ", Right Wheel Position (rad): " << rightWheelPos << std::endl;
 
     Print(output.str());
 }
