@@ -1,7 +1,5 @@
 #include <EPuck.hpp>
 
-const std::string EPuck::PLAN_INPUT_FILE = "../../MotionPlan.txt";
-const std::string EPuck::EXECUTION_OUTPUT_FILE = "../../MotionExecution.csv";
 const std::string EPuck::PRINT_PREFIX = "[z5207471_MTRN4110_PhaseA] ";
 
 const std::array<std::string, EPuck::NUM_DISTANCE_SENSORS> EPuck::distSensorNames =
@@ -53,10 +51,10 @@ const std::map<Direction, double> EPuck::HEADING_YAWS =
 
 EPuck::EPuck()
 {
-    timeStep = (int)getBasicTimeStep();
-
     planStep = 0;
     stepEndTime = 0.0;
+    isStepComplete = false;
+    hasSampledWallDistance = false;
     isPlanComplete = false;
 
     turnDuration = M_PI_2 * AXLE_LENGTH / (2 * TURN_SPEED * WHEEL_RADIUS);
@@ -71,12 +69,14 @@ EPuck::EPuck()
     for (int i = 0; i < NUM_DISTANCE_SENSORS; i++)
     {
         distSensors[i] = std::make_unique<webots::DistanceSensor>(*getDistanceSensor(distSensorNames[i]));
-        distSensors[i]->enable(timeStep);
+        distSensors[i]->enable(TIME_STEP);
     }
+
+    numWallDistSamples = 0;
 
     IMU = std::make_unique<webots::InertialUnit>(*getInertialUnit("IMU"));
 
-    IMU->enable(timeStep);
+    IMU->enable(TIME_STEP);
 
     leftMotor = std::make_unique<webots::Motor>(*getMotor("left wheel motor"));
     rightMotor = std::make_unique<webots::Motor>(*getMotor("right wheel motor"));
@@ -96,17 +96,23 @@ EPuck::EPuck()
     leftPosSensor = std::make_unique<webots::PositionSensor>(*getPositionSensor("left wheel sensor"));
     rightPosSensor = std::make_unique<webots::PositionSensor>(*getPositionSensor("right wheel sensor"));
 
-    leftPosSensor->enable(timeStep);
-    rightPosSensor->enable(timeStep);
+    leftPosSensor->enable(TIME_STEP);
+    rightPosSensor->enable(TIME_STEP);
+}
+
+void EPuck::ExecutePlan()
+{
+    Print("Executing motion plan...\n");
+
+    while (step(TIME_STEP) != -1)
+    {
+        Run();
+    }
 }
 
 void EPuck::Run()
 {
     UpdateSensors();
-
-    wallVisibility[0] = distReadings[7] <= WALL_DETECTION_THRESHOLD;
-    wallVisibility[1] = distReadings[0] <= WALL_DETECTION_THRESHOLD;
-    wallVisibility[2] = distReadings[3] <= WALL_DETECTION_THRESHOLD;
 
     isStepComplete = IsWithinTolerance(leftWheelPos, leftWheelSetPos, POSITION_TOLERANCE) &&
                      IsWithinTolerance(rightWheelPos, rightWheelSetPos, POSITION_TOLERANCE);
@@ -114,59 +120,95 @@ void EPuck::Run()
     // Check if current step has been completed
     if (!isPlanComplete && isStepComplete)
     {
-        if (planStep < plan->steps.size())
+        if (hasSampledWallDistance)
         {
-            if (planStep == 0)
-            {
-                Print("Executing motion plan...\n");
-            }
-
             PrintPlanState();
-            fileHandler.WritePlanState(EXECUTION_OUTPUT_FILE, planStep, row, column, heading, wallVisibility);
+            fileHandler.WritePlanState(motionExecutionFilePath, planStep, row, column, heading, wallVisibility);
 
-            // Move to next step
-            switch (plan->steps[planStep])
+            if (planStep < plan->steps.size())
             {
-                case Movement::Left:
-                    leftWheelSetPos = leftWheelPos - turnPosDelta;
-                    rightWheelSetPos = rightWheelPos + turnPosDelta;
-                    leftSetSpeed = TURN_SPEED;
-                    rightSetSpeed = TURN_SPEED;
+                // Move to next step
+                switch (plan->steps[planStep])
+                {
+                    case Movement::Left:
+                        leftWheelSetPos = leftWheelPos - turnPosDelta;
+                        rightWheelSetPos = rightWheelPos + turnPosDelta;
+                        leftSetSpeed = TURN_SPEED;
+                        rightSetSpeed = TURN_SPEED;
 
-                    heading = LEFT_TURN_MAP.at(heading);
-                    break;
-                case Movement::Forward:
-                    leftWheelSetPos = leftWheelPos + forwardPosDelta;
-                    rightWheelSetPos = rightWheelPos + forwardPosDelta;
-                    leftSetSpeed = FORWARD_SPEED;
-                    rightSetSpeed = FORWARD_SPEED;
+                        heading = LEFT_TURN_MAP.at(heading);
+                        break;
+                    case Movement::Forward:
+                        leftWheelSetPos = leftWheelPos + forwardPosDelta;
+                        rightWheelSetPos = rightWheelPos + forwardPosDelta;
+                        leftSetSpeed = FORWARD_SPEED;
+                        rightSetSpeed = FORWARD_SPEED;
 
-                    row += MOVEMENT_DELTAS.at(heading)[0];
-                    column += MOVEMENT_DELTAS.at(heading)[1];
-                    break;
-                case Movement::Right:
-                    leftWheelSetPos = leftWheelPos + turnPosDelta;
-                    rightWheelSetPos = rightWheelPos - turnPosDelta;
-                    leftSetSpeed = TURN_SPEED;
-                    rightSetSpeed = TURN_SPEED;
+                        row += MOVEMENT_DELTAS.at(heading)[0];
+                        column += MOVEMENT_DELTAS.at(heading)[1];
+                        break;
+                    case Movement::Right:
+                        leftWheelSetPos = leftWheelPos + turnPosDelta;
+                        rightWheelSetPos = rightWheelPos - turnPosDelta;
+                        leftSetSpeed = TURN_SPEED;
+                        rightSetSpeed = TURN_SPEED;
 
-                    heading = RIGHT_TURN_MAP.at(heading);
-                    break;
-                default:
-                    throw std::runtime_error(PRINT_PREFIX + "Invalid Movement value encountered.");
-                    break;
+                        heading = RIGHT_TURN_MAP.at(heading);
+                        break;
+                    default:
+                        throw std::runtime_error(PRINT_PREFIX + "Invalid Movement value encountered.");
+                        break;
+                }
+
+                hasSampledWallDistance = false;
+                numWallDistSamples = 0;
+                planStep++;
             }
-            planStep++;
+            else
+            {
+                // All steps complete, plan is complete
+                Print("Motion plan executed!\n");
+                leftWheelSetPos = INFINITY;
+                rightWheelSetPos = INFINITY;
+                leftSetSpeed = 0.0;
+                rightSetSpeed = 0.0;
+                isPlanComplete = true;
+            }
         }
         else
         {
-            // All steps complete, plan is complete
-            Print("Motion plan executed!\n");
-            leftWheelSetPos = INFINITY;
-            rightWheelSetPos = INFINITY;
             leftSetSpeed = 0.0;
             rightSetSpeed = 0.0;
-            isPlanComplete = true;
+
+            if (numWallDistSamples == WALL_DIST_SAMPLE_SIZE)
+            {
+                float leftWallDist = 0.0, frontWallDist = 0.0, rightWallDist = 0.0;
+
+                for (int i = 0; i < WALL_DIST_SAMPLE_SIZE; i++)
+                {
+                    leftWallDist += wallDistSamples[0][i];
+                    frontWallDist += wallDistSamples[1][i];
+                    rightWallDist += wallDistSamples[2][i];
+                }
+
+                leftWallDist /= (float)WALL_DIST_SAMPLE_SIZE;
+                frontWallDist /= (float)WALL_DIST_SAMPLE_SIZE;
+                rightWallDist /= (float)WALL_DIST_SAMPLE_SIZE;
+
+                wallVisibility[0] = leftWallDist <= WALL_DETECTION_THRESHOLD;
+                wallVisibility[1] = frontWallDist <= WALL_DETECTION_THRESHOLD;
+                wallVisibility[2] = rightWallDist <= WALL_DETECTION_THRESHOLD;
+
+                hasSampledWallDistance = true;
+            }
+            else
+            {
+                wallDistSamples[0][numWallDistSamples] = distReadings[LEFT_DIST_SENSOR_INDEX];
+                wallDistSamples[1][numWallDistSamples] = distReadings[FRONT_DIST_SENSOR_INDEX];
+                wallDistSamples[2][numWallDistSamples] = distReadings[RIGHT_DIST_SENSOR_INDEX];
+
+                numWallDistSamples++;
+            }
         }
     }
 
@@ -180,13 +222,14 @@ void EPuck::Run()
 
 int EPuck::GetTimeStep() const
 {
-    return timeStep;
+    return TIME_STEP;
 }
 
-void EPuck::ReadMotionPlan()
+void EPuck::ReadMotionPlan(std::string filePath)
 {
-    Print("Reading in motion plan from " + PLAN_INPUT_FILE + "...\n");
-    plan = fileHandler.ReadMotionPlan(PLAN_INPUT_FILE);
+    motionPlanFilePath = filePath;
+    Print("Reading in motion plan from " + motionPlanFilePath + "...\n");
+    plan = fileHandler.ReadMotionPlan(motionPlanFilePath);
     Print("Motion Plan: " + plan->line + '\n');
 
     row = plan->initRow;
@@ -196,9 +239,10 @@ void EPuck::ReadMotionPlan()
     Print("Motion plan read in!\n");
 }
 
-void EPuck::SetUpExecutionFile()
+void EPuck::SetUpExecutionFile(std::string filePath)
 {
-    fileHandler.WriteExecutionHeader(EXECUTION_OUTPUT_FILE);
+    motionExecutionFilePath = filePath;
+    fileHandler.WriteExecutionHeader(motionExecutionFilePath);
 }
 
 void EPuck::UpdateSensors()

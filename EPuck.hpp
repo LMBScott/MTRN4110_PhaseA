@@ -11,13 +11,18 @@
 class EPuck : public webots::Robot {
 public:
     EPuck();
-    void Run();                                                         // Run the robot for a single timestep
+    void ExecutePlan();
     int GetTimeStep() const;                                            // Retrieve the basic time step of the simulation
-    void ReadMotionPlan();
-    void SetUpExecutionFile();
+    void ReadMotionPlan(std::string filePath);
+    void SetUpExecutionFile(std::string filePath);
 private:
+    static constexpr int TIME_STEP {64};
     static constexpr int NUM_DISTANCE_SENSORS {11};                     // Number of distance sensors on the e-puck robot
-    static constexpr int DIST_SAMPLE_SIZE {5};
+    static constexpr int NUM_WALL_DIST_SENSORS {3};
+    static constexpr int WALL_DIST_SAMPLE_SIZE {10};
+    static constexpr int LEFT_DIST_SENSOR_INDEX {7};
+    static constexpr int FRONT_DIST_SENSOR_INDEX {0};
+    static constexpr int RIGHT_DIST_SENSOR_INDEX {3};
     static constexpr double MAX_MOTOR_SPEED {6.28};                     // Max motor speed of the e-puck robot, in rads/s
     static constexpr double TURN_SPEED {MAX_MOTOR_SPEED / 4};           // Speed of motors during a turn, in rads/s
     static constexpr double FORWARD_SPEED {MAX_MOTOR_SPEED / 2};        // Speed of motors moving forward, in rads/s
@@ -28,8 +33,6 @@ private:
     static constexpr double WALL_DETECTION_THRESHOLD {750.0};           // Minimum proximity sensor reading indicating wall presence
     static constexpr double POSITION_TOLERANCE {0.02};
     static constexpr double TURN_ANGLE_TOLERANCE {0.04};                // Tolerance of turn angles, in radians
-    static const std::string PLAN_INPUT_FILE;
-    static const std::string EXECUTION_OUTPUT_FILE;
     static const std::array<std::string, NUM_DISTANCE_SENSORS> distSensorNames;
     static const std::string PRINT_PREFIX;
     static const std::map<Direction, std::array<int, 2>>
@@ -37,20 +40,10 @@ private:
     static const std::map<Direction, Direction> LEFT_TURN_MAP;          // Resultant heading from a left turn starting at each heading
     static const std::map<Direction, Direction> RIGHT_TURN_MAP;         // Resultant heading from a right turn starting at each heading
     static const std::map<Direction, double> HEADING_YAWS;              // Expected yaw angle reading from IMU for each heading
-    int timeStep;                                                       // Stores simulation time step
     int planStep;
     int row;
     int column;
-    Direction heading;
-    std::array<bool, 3> wallVisibility;
-    std::array<double, NUM_DISTANCE_SENSORS> distReadings;              // Stores current reading values of each built-in distance sensor
-    std::array<std::unique_ptr<webots::DistanceSensor>, NUM_DISTANCE_SENSORS>
-        distSensors;                                                    // Stores pointers to each built-in distance sensor
-    std::unique_ptr<webots::InertialUnit> IMU;
-    std::unique_ptr<webots::Motor> leftMotor;
-    std::unique_ptr<webots::Motor> rightMotor;
-    std::unique_ptr<webots::PositionSensor> leftPosSensor;
-    std::unique_ptr<webots::PositionSensor> rightPosSensor;
+    int numWallDistSamples;
     double simTime;                                                     // Stores current simulation time
     double turnDuration;
     double forwardDuration;
@@ -67,10 +60,24 @@ private:
     double pitch;
     double yaw;
     bool isStepComplete;
+    bool hasSampledWallDistance;
     bool isPlanComplete;
     FileHandler fileHandler;
+    Direction heading;
     std::unique_ptr<MotionPlan> plan;
-    bool IsWithinTolerance(double value, double target, double tolerance);
+    std::unique_ptr<webots::InertialUnit> IMU;
+    std::unique_ptr<webots::Motor> leftMotor;
+    std::unique_ptr<webots::Motor> rightMotor;
+    std::unique_ptr<webots::PositionSensor> leftPosSensor;
+    std::unique_ptr<webots::PositionSensor> rightPosSensor;
+    std::array<std::array<int, WALL_DIST_SAMPLE_SIZE>, NUM_WALL_DIST_SENSORS> wallDistSamples;
+    std::array<bool, NUM_WALL_DIST_SENSORS> wallVisibility;
+    std::array<double, NUM_DISTANCE_SENSORS> distReadings;              // Stores current reading values of each built-in distance sensor
+    std::array<std::unique_ptr<webots::DistanceSensor>, NUM_DISTANCE_SENSORS>
+        distSensors;                                                    // Stores pointers to each built-in distance sensor
+    std::string motionPlanFilePath;
+    std::string motionExecutionFilePath;
+    void Run();                                                         // Run the robot for a single timestep
     void UpdateSensors();
     void Print(std::string message);
     void PrintPlanState();
@@ -78,4 +85,5 @@ private:
     void PrintIMUReadings();
     void PrintDistanceReadings();
     void PrintWheelPositions();
+    bool IsWithinTolerance(double value, double target, double tolerance);
 };

@@ -6,18 +6,16 @@
 
 #include <EPuck.hpp>
 
+const std::string MOTION_PLAN_FILE_NAME = "../../MotionPlan.txt";
+const std::string MOTION_EXECUTION_FILE_NAME = "../../MotionExecution.csv";
+
 int main(int argc, char **argv)
 {
     EPuck ePuck {};
-    int timeStep = ePuck.GetTimeStep();
 
-    ePuck.ReadMotionPlan();
-    ePuck.SetUpExecutionFile();
-
-    while (ePuck.step(timeStep) != -1)
-    {
-        ePuck.Run();
-    };
+    ePuck.ReadMotionPlan(MOTION_PLAN_FILE_NAME);
+    ePuck.SetUpExecutionFile(MOTION_EXECUTION_FILE_NAME);
+    ePuck.ExecutePlan();
 
     return 0;
 }
