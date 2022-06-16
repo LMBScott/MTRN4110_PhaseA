@@ -86,7 +86,7 @@ void FileHandler::WritePlanState(std::string filePath, int step, int row, int co
              << (char)heading << ','
              << (wallVisibility[0] ? 'Y' : 'N') << ','
              << (wallVisibility[1] ? 'Y' : 'N') << ','
-             << (wallVisibility[2] ? 'Y' : 'N') << std::endl;
+             << (wallVisibility[2] ? 'Y' : 'N') << ',' << std::endl;
         fout.close();
     } else {
         // Throw an error message if file failed to open
