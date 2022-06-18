@@ -1,8 +1,8 @@
-// File:          PhaseA.cpp
-// Date:
-// Description:
-// Author:
-// Modifications:
+// File:                 z5207471_MTRN4110_PhaseA.cpp
+// Date:                 10/06/2022
+// Description:          Main file for the execution of tasks required for Phase A of the MTRN4110 assignment project
+// Author:               Lachlan Scott (z5207471)
+// Development Platform: MacOS 12.4 Monterey, M1 Pro processor
 
 #include <EPuck.hpp>
 
