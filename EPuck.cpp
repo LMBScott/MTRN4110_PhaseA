@@ -41,14 +41,6 @@ const std::map<Direction, Direction> EPuck::RIGHT_TURN_MAP =
     { Direction::West, Direction::North }
 };
 
-const std::map<Direction, double> EPuck::HEADING_YAWS =
-{
-    { Direction::North, 0.0 },
-    { Direction::South, M_PI },
-    { Direction::East, -M_PI_2 },
-    { Direction::West, M_PI_2 }
-};
-
 EPuck::EPuck()
 {
     planStep = 0;
@@ -57,10 +49,10 @@ EPuck::EPuck()
     hasSampledWallDistance = false;
     isPlanComplete = false;
 
-    turnDuration = M_PI_2 * AXLE_LENGTH / (2 * TURN_SPEED * WHEEL_RADIUS);
-    forwardDuration = INTER_CELL_DIST / WHEEL_RADIUS / FORWARD_SPEED;
-
+    // Absolute change in wheel position for a 90-degree turn in either direction is constant
     turnPosDelta = AXLE_LENGTH / WHEEL_RADIUS;
+
+    // Absolute change in wheel position for a forward movement is constant
     forwardPosDelta = INTER_CELL_DIST / WHEEL_RADIUS;
 
     leftSetSpeed = 0.0;
@@ -120,14 +112,16 @@ void EPuck::Run()
     // Check if current step has been completed
     if (!isPlanComplete && isStepComplete)
     {
+        // Current step has been completed, sample wall distances then move to next step
         if (hasSampledWallDistance)
         {
+            // Wall distance has been sampled, print plan state and move to next step
             PrintPlanState();
             fileHandler.WritePlanState(motionExecutionFilePath, planStep, row, column, heading, wallVisibility);
 
             if (planStep < plan->steps.size())
             {
-                // Move to next step
+                // At least one step remaining, prepare to execute next step
                 switch (plan->steps[planStep])
                 {
                     case Movement::Left:
@@ -177,11 +171,13 @@ void EPuck::Run()
         }
         else
         {
+            // Stop to sample the distances of walls to the front, left and right for an accurate reading
             leftSetSpeed = 0.0;
             rightSetSpeed = 0.0;
 
             if (numWallDistSamples == WALL_DIST_SAMPLE_SIZE)
             {
+                // Adequate number of samples obtained, take averages as the true distances
                 float leftWallDist = 0.0, frontWallDist = 0.0, rightWallDist = 0.0;
 
                 for (int i = 0; i < WALL_DIST_SAMPLE_SIZE; i++)
@@ -195,6 +191,7 @@ void EPuck::Run()
                 frontWallDist /= (float)WALL_DIST_SAMPLE_SIZE;
                 rightWallDist /= (float)WALL_DIST_SAMPLE_SIZE;
 
+                // Wall is considered visible if it is directly adjacent to the current cell
                 wallVisibility[0] = leftWallDist <= WALL_DETECTION_THRESHOLD;
                 wallVisibility[1] = frontWallDist <= WALL_DETECTION_THRESHOLD;
                 wallVisibility[2] = rightWallDist <= WALL_DETECTION_THRESHOLD;
@@ -203,6 +200,7 @@ void EPuck::Run()
             }
             else
             {
+                // Take the current reading from each wall distance sensor as a sample
                 wallDistSamples[0][numWallDistSamples] = distReadings[LEFT_DIST_SENSOR_INDEX];
                 wallDistSamples[1][numWallDistSamples] = distReadings[FRONT_DIST_SENSOR_INDEX];
                 wallDistSamples[2][numWallDistSamples] = distReadings[RIGHT_DIST_SENSOR_INDEX];
@@ -225,6 +223,7 @@ int EPuck::GetTimeStep() const
     return TIME_STEP;
 }
 
+// Read in the motion plan from the specified file path, and set the initial pose accordingly
 void EPuck::ReadMotionPlan(std::string filePath)
 {
     motionPlanFilePath = filePath;
@@ -239,12 +238,14 @@ void EPuck::ReadMotionPlan(std::string filePath)
     Print("Motion plan read in!\n");
 }
 
+// Create or overwrite the csv output file at the specified path, and add the required heading on the first line
 void EPuck::SetUpExecutionFile(std::string filePath)
 {
     motionExecutionFilePath = filePath;
     fileHandler.WriteExecutionHeader(motionExecutionFilePath);
 }
 
+// Obtain the most current reading for each of the e-puck's sensors
 void EPuck::UpdateSensors()
 {
     for (int i = 0; i < NUM_DISTANCE_SENSORS; i++)
@@ -260,6 +261,7 @@ void EPuck::UpdateSensors()
     rightWheelPos = rightPosSensor->getValue();
 }
 
+// Whether a given value is within a specified tolerance of a target value
 bool EPuck::IsWithinTolerance(double value, double target, double tolerance)
 {
     return (value >= target - tolerance) && (value <= target + tolerance);
